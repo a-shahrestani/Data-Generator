@@ -1,5 +1,6 @@
 # %matplotlib inline
 import argparse
+import datetime
 import os
 import random
 import torch
@@ -24,6 +25,9 @@ torch.use_deterministic_algorithms(True)  # Needed for reproducible results
 
 # Root directory for dataset
 data_root = '../../../datasets/Celeba/'
+
+# Result directory
+result_root = './results/'
 
 # Number of workers for dataloader
 workers = 2
@@ -57,7 +61,7 @@ lr = 0.0002
 beta1 = 0.5
 
 # Number of GPUs available. Use 0 for CPU mode.
-ngpu = 0
+ngpu = 1
 
 
 def batch_visualizer(device, dataloader, number_of_images=64):
@@ -74,19 +78,6 @@ def batch_visualizer(device, dataloader, number_of_images=64):
         np.transpose(vutils.make_grid(real_batch[0].to(device)[:number_of_images], padding=2, normalize=True).cpu(),
                      (1, 2, 0)))
     plt.show()
-
-
-def weight_initializer(m):
-    """
-    Usage: Initializes the weights of the model from a normal distribution with mean 0 and std 0.02
-    :param m: model
-    """
-    classname = m.__class__.__name__
-    if classname.find('Conv') != -1:
-        nn.init.normal_(m.weight.data, 0.0, 0.02)
-    elif classname.find('BatchNorm') != -1:
-        nn.init.normal_(m.weight.data, 0.0, 0.02)
-        nn.init.constant_(m.bias.data, 0)
 
 
 class Generator(nn.Module):
@@ -155,6 +146,189 @@ class Discriminator(nn.Module):
         return self.main(input)
 
 
+class GAN:
+    def __init__(self, device, ngpu):
+        # Create the generator and initialize the weights
+        self.netG = Generator(ngpu).to(device)
+        self.netG.apply(self.weight_initializer)
+        # Create the Discriminator and initialize the weights
+        self.netD = Discriminator(ngpu).to(device)
+        self.netD.apply(self.weight_initializer)
+        # Initialize BCELoss function for the GAN
+        self.criterion = nn.BCELoss()
+        # Lists to keep track of progress
+        self.img_list = []
+        self.G_losses = []
+        self.D_losses = []
+
+    def train(self, dataloader,
+              device,
+              nz,
+              lr=0.0001,
+              beta1=0.5,
+              num_epochs=5,
+              verbose=1,
+              save_checkpoint=True,
+              result_root=None,
+              checkpoint_interval=1):
+        # Create batch of latent vectors that we will use to visualize the progression of the generator
+        fixed_noise = torch.randn(64, nz, 1, 1, device=device)
+
+        # Establish convention for real and fake labels during training
+        real_label = 1.0
+        fake_label = 0.0
+
+        # Adam Optimizer for both the generator and the discriminator as per the DCGAN paper
+        optimizerG = optim.Adam(self.netG.parameters(), lr=lr, betas=(beta1, 0.999))
+        optimizerD = optim.Adam(self.netD.parameters(), lr=lr, betas=(beta1, 0.999))
+
+        # Training Loop
+
+        # First a batch of real images are created and then a batch of fake images are created Loss is calculated for
+        # both the discriminator and the generator log(1-D(G(z))) is the loss for the generator. We want to minimize
+        # this loss so that the generator can fool the discriminator log(D(x)) + log(1-D(G(z))) is the loss for the
+        # discriminator. We want to minimize this loss so that the discriminator can distinguish between real and
+        # fake images. The discriminator and the generator are trained separately. The discriminator is trained first
+        # and then the generator is trained. This is done because the discriminator is a more complex network and it
+        # takes longer to train.
+
+        # Lists to keep track of progress
+        iters = 0
+
+        print("Starting Training Loop...")
+        now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        run_path = result_root + f'run_{now}'
+        os.mkdir(run_path)
+        # For each epoch
+        for epoch in range(num_epochs):
+            # for each batch in the dataloader
+            for i, data in enumerate(dataloader, 0):
+                # (1) Update D network: maximize log(D(x)) + log(1 - D(G(z))) #########################################
+
+                # First the discriminator is trained on real images
+                self.netD.zero_grad()  # Zeroing the gradients of the discriminator
+                # Format batch
+                real_cpu = data[0].to(device)  # The real images are sent to the GPU
+                b_size = real_cpu.size(0)  # The batch size is calculated
+                label = torch.full((b_size,), real_label, device=device)  # The labels for the real images are created
+
+                # Forward pass
+                output = self.netD(real_cpu).view(
+                    -1)  # The real images are sent to the discriminator and the output is calculated
+                errD_real = self.criterion(output, label)  # The loss for the real images is calculated
+
+                # Backward pass
+                errD_real.backward()  # The gradients are calculated
+                D_x = output.mean().item()  # The mean of the output is calculated
+
+                # train on the fake images
+                # noise in generated
+                noise = torch.randn(b_size, nz, 1, 1, device=device)  # The noise is created
+                # generate fake images
+                fake = self.netG(noise)
+                label.fill_(fake_label)  # The labels for the fake images are created
+                # Classify the fake images with the discriminator
+
+                # Forward pass
+                output = self.netD(fake.detach()).view(-1)
+                errD_fake = self.criterion(output, label)  # The loss for the fake images is calculated
+
+                # Backward pass
+                errD_fake.backward()  # The gradients are calculated
+                D_G_z1 = output.mean().item()  # The mean of the output is calculated
+
+                # Computing the total loss for the discriminator
+                errD = errD_real + errD_fake
+                optimizerD.step()  # The optimizer is updated
+
+                # (2) Update G network: maximize log(D(G(z))) #########################################################
+
+                self.netG.zero_grad()
+                label.fill_(real_label)  # fake labels are real for generator cost
+                # Since only discriminator is updated, the output of the generator is calculated again
+                output = self.netD(fake).view(-1)
+                # Calculate G's loss based on this output
+                errG = self.criterion(output, label)  # The loss for the generator is calculated
+                # Backward pass
+                errG.backward()  # The gradients are calculated
+                D_G_z2 = output.mean().item()  # The mean of the output is calculated
+                # Update G
+                optimizerG.step()  # The optimizer is updated
+
+                if verbose == 1:
+                    # Output training stats
+                    if i % 50 == 0:
+                        print('[%d/%d][%d/%d]\tLoss_D: %.4f\tLoss_G: %.4f\tD(x): %.4f\tD(G(z)): %.4f / %.4f' %
+                              (epoch + 1, num_epochs, i, len(dataloader),
+                               errD.item(), errG.item(), D_x, D_G_z1, D_G_z2))
+                    # Saving losses for plotting later
+                    self.G_losses.append(errG.item())
+                    self.D_losses.append(errD.item())
+
+                    # Check how the generator is doing by saving G's output on fixed_noise
+                    if (iters % 500 == 0) or ((epoch == num_epochs - 1) and (i == len(dataloader) - 1)):
+                        with torch.no_grad():  # No gradients are calculated saving memory and time
+                            fake = self.netG(fixed_noise).detach().cpu()
+                        self.img_list.append(
+                            vutils.make_grid(fake, padding=2, normalize=True))  # The fake images are saved
+
+                    iters += 1
+            if save_checkpoint and epoch % checkpoint_interval == 0:
+                os.mkdir(run_path + '/epoch_' + str(epoch))
+                self.save_model(run_path + '/epoch_' + str(epoch) + '/')  # The model is saved
+
+    def weight_initializer(self, m):
+        """
+        Usage: Initializes the weights of the model from a normal distribution with mean 0 and std 0.02
+        :param m: model
+        """
+        classname = m.__class__.__name__
+        if classname.find('Conv') != -1:
+            nn.init.normal_(m.weight.data, 0.0, 0.02)
+        elif classname.find('BatchNorm') != -1:
+            nn.init.normal_(m.weight.data, 0.0, 0.02)
+            nn.init.constant_(m.bias.data, 0)
+
+    def save_model(self, path):
+        # Saving the model
+        torch.save(self.netG, path + 'generator.rar')
+        torch.save(self.netD, path + 'discriminator.rar')
+
+    def load_model(self, path):
+        # Loading the model
+        self.netG = torch.load(path + 'generator.rar')
+        self.netD = torch.load(path + 'discriminator.rar')
+    def result_visualization(self):
+        # Visualization of the results
+        plt.figure(figsize=(10, 5))
+        plt.title("Generator and Discriminator Loss During Training")
+        plt.plot(self.G_losses, label="G")
+        plt.plot(self.D_losses, label="D")
+        plt.xlabel("iterations")
+        plt.ylabel("Loss")
+        plt.legend()
+        plt.show()
+
+    def side_by_side_comparison(self, data_loader):
+        # Grab a batch of real images from the dataloader
+        real_batch = next(iter(dataloader))
+
+        # Plot the real images
+        plt.figure(figsize=(15, 15))
+        plt.subplot(1, 2, 1)
+        plt.axis("off")
+        plt.title("Real Images")
+        plt.imshow(
+            np.transpose(vutils.make_grid(real_batch[0].to(device)[:64], padding=5, normalize=True).cpu(), (1, 2, 0)))
+
+        # Plot the fake images from the last epoch
+        plt.subplot(1, 2, 2)
+        plt.axis("off")
+        plt.title("Fake Images")
+        plt.imshow(np.transpose(self.img_list[-1], (1, 2, 0)))
+        plt.show()
+
+
 if __name__ == '__main__':
     # We can use an image folder dataset the way we have it setup.
     # Create the dataset
@@ -173,12 +347,15 @@ if __name__ == '__main__':
     # Plot some training images
     # batch_visualizer(device, dataloader, number_of_images=64)
 
-    # Create the generator
-    netG = Generator(ngpu).to(device)
-    netG.apply(weight_initializer)
-    print(netG)
-
-    # Create the Discriminator
-    netD = Discriminator(ngpu).to(device)
-    netD.apply(weight_initializer)
-    print(netD)
+    model = GAN(device=device, ngpu=ngpu)
+    model.train(dataloader=dataloader,
+                device=device,
+                num_epochs=num_epochs,
+                verbose=1,
+                nz=nz,
+                lr=lr,
+                beta1=beta1,
+                save_checkpoint=True,
+                checkpoint_interval=1,
+                result_root=result_root
+                )
