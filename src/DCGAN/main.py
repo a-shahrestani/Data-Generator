@@ -205,6 +205,8 @@ class GAN:
         now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         run_path = result_root + f'run_{now}'
         os.mkdir(run_path)
+        f = open(run_path + '/log.txt', 'w')
+        f.close()
         # For each epoch
         for epoch in range(num_epochs):
             # for each batch in the dataloader
@@ -290,8 +292,8 @@ class GAN:
                     os.mkdir(run_path + '/epoch_' + str(epoch))
                     self.save_model(run_path + '/epoch_' + str(epoch) + '/')  # The model is saved
 
-            # Report progress every epoch
-            with open(run_path + '/progress.txt', 'wb') as f:
+            # Log every epoch
+            with open(run_path + '/log.txt', 'a') as f:
                 f.write(f'Epoch: {epoch} G_loss: {self.G_losses_mean[-1]} D_loss: {self.D_losses_mean[-1]} \n')
 
     def generate_images(self, num_images, path):
