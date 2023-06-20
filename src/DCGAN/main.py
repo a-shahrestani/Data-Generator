@@ -147,7 +147,7 @@ class Discriminator(nn.Module):
 
 
 class GAN:
-    def __init__(self, device, ngpu):
+    def __init__(self, device, ngpu, nz=100):
         # Create the generator and initialize the weights
         self.netG = Generator(ngpu).to(device)
         self.netG.apply(self.weight_initializer)
@@ -156,10 +156,16 @@ class GAN:
         self.netD.apply(self.weight_initializer)
         # Initialize BCELoss function for the GAN
         self.criterion = nn.BCELoss()
+        # Latent vector to visualize the progression of the generator
+        self.nz = nz
         # Lists to keep track of progress
         self.img_list = []
         self.G_losses = []
         self.D_losses = []
+
+        # Mean loss calculation for each epoch
+        self.G_losses_mean = None
+        self.D_losses_mean = None
 
     def train(self, dataloader,
               device,
@@ -261,21 +267,48 @@ class GAN:
                         print('[%d/%d][%d/%d]\tLoss_D: %.4f\tLoss_G: %.4f\tD(x): %.4f\tD(G(z)): %.4f / %.4f' %
                               (epoch + 1, num_epochs, i, len(dataloader),
                                errD.item(), errG.item(), D_x, D_G_z1, D_G_z2))
-                    # Saving losses for plotting later
-                    self.G_losses.append(errG.item())
-                    self.D_losses.append(errD.item())
-
                     # Check how the generator is doing by saving G's output on fixed_noise
                     if (iters % 500 == 0) or ((epoch == num_epochs - 1) and (i == len(dataloader) - 1)):
                         with torch.no_grad():  # No gradients are calculated saving memory and time
                             fake = self.netG(fixed_noise).detach().cpu()
                         self.img_list.append(
                             vutils.make_grid(fake, padding=2, normalize=True))  # The fake images are saved
+                if verbose == 2:
+                    print(f'Epoch {epoch + 1}/{num_epochs} Batch {i + 1}/{len(dataloader)}')
+                # Saving losses for plotting later
+                self.G_losses.append(errG.item())
+                self.D_losses.append(errD.item())
+                iters += 1
+            self.G_losses_mean = np.append(self.G_losses_mean, np.mean(self.G_losses[-len(dataloader):]))
+            self.D_losses_mean = np.append(self.D_losses_mean, np.mean(self.D_losses[-len(dataloader):]))
+            # Save model checkpoints by epoch interval
+            if save_checkpoint:
+                if not os.path.exists(run_path + '/current'):
+                    os.mkdir(run_path + '/current')
+                self.save_model(run_path + '/current/')
+                if epoch % checkpoint_interval == 0:
+                    os.mkdir(run_path + '/epoch_' + str(epoch))
+                    self.save_model(run_path + '/epoch_' + str(epoch) + '/')  # The model is saved
 
-                    iters += 1
-            if save_checkpoint and epoch % checkpoint_interval == 0:
-                os.mkdir(run_path + '/epoch_' + str(epoch))
-                self.save_model(run_path + '/epoch_' + str(epoch) + '/')  # The model is saved
+            # Report progress every epoch
+            with open(run_path + '/progress.txt', 'wb') as f:
+                f.write(f'Epoch: {epoch} G_loss: {self.G_losses_mean[-1]} D_loss: {self.D_losses_mean[-1]} \n')
+
+    def generate_images(self, num_images, path):
+        """
+        Usage: Generates images with the generator
+        :param num_images: number of images to generate
+        :param path: path to save the images
+        """
+        # Generate images
+        if not os.path.exists(path):
+            os.mkdir(path)
+        with torch.no_grad():
+            noise = torch.randn(num_images, nz, 1, 1, device=device)
+            fake = self.netG(noise).detach().cpu()
+        # Save images
+        for i in range(num_images):
+            vutils.save_image(fake[i], path + 'image_' + str(i) + '.png')
 
     def weight_initializer(self, m):
         """
@@ -298,6 +331,7 @@ class GAN:
         # Loading the model
         self.netG = torch.load(path + 'generator.rar')
         self.netD = torch.load(path + 'discriminator.rar')
+
     def result_visualization(self):
         # Visualization of the results
         plt.figure(figsize=(10, 5))
@@ -348,14 +382,18 @@ if __name__ == '__main__':
     # batch_visualizer(device, dataloader, number_of_images=64)
 
     model = GAN(device=device, ngpu=ngpu)
+    run_name = 'run_2023-06-20_14-20-30'
+    model.load_model(result_root + run_name + '/epoch_40/')
     model.train(dataloader=dataloader,
                 device=device,
-                num_epochs=num_epochs,
+                num_epochs=100,
                 verbose=1,
                 nz=nz,
                 lr=lr,
                 beta1=beta1,
                 save_checkpoint=True,
-                checkpoint_interval=1,
+                checkpoint_interval=10,
                 result_root=result_root
                 )
+
+    # model.generate_images(num_images=10, path=result_root + run_name + '/generated_images/')
