@@ -1,8 +1,10 @@
 # %matplotlib inline
-import argparse
 import datetime
 import os
 import random
+import re
+
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.parallel
@@ -13,7 +15,6 @@ import torchvision.transforms as transforms
 import torchvision.utils as vutils
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.animation as animation
 
 # Set random seed for reproducibility
 manualSeed = 999
@@ -55,7 +56,7 @@ ndf = 64
 num_epochs = 5
 
 # Learning rate for optimizers
-lr = 0.0002
+lr = 0.001
 
 # Beta1 hyperparameter for Adam optimizers
 beta1 = 0.5
@@ -133,11 +134,11 @@ class Discriminator(nn.Module):
             nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),  # 32x32
             nn.BatchNorm2d(ndf * 4),
             nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*4) x 32 x 32
+            # state size. (ndf*4) x 8 x 8
             nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False),  # 64x64
             nn.BatchNorm2d(ndf * 8),
             nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*8) x 64 x 64
+            # state size. (ndf*8) x 4 x 4
             nn.Conv2d(ndf * 8, 1, 4, 1, 0, bias=False),
             nn.Sigmoid()
         )
@@ -170,13 +171,14 @@ class GAN:
     def train(self, dataloader,
               device,
               nz,
-              lr=0.0001,
+              lr=0.0002,
               beta1=0.5,
               num_epochs=5,
               verbose=1,
               save_checkpoint=True,
               result_root=None,
-              checkpoint_interval=1):
+              checkpoint_interval=1,
+              generate_images=False):
         # Create batch of latent vectors that we will use to visualize the progression of the generator
         fixed_noise = torch.randn(64, nz, 1, 1, device=device)
 
@@ -295,6 +297,9 @@ class GAN:
             # Log every epoch
             with open(run_path + '/log.txt', 'a') as f:
                 f.write(f'Epoch: {epoch} G_loss: {self.G_losses_mean[-1]} D_loss: {self.D_losses_mean[-1]} \n')
+        # self.log_to_csv(run_path + '/log.txt')
+        if generate_images:
+            self.generate_images(100, run_path + '/generated_images/')
 
     def generate_images(self, num_images, path):
         """
@@ -311,6 +316,13 @@ class GAN:
         # Save images
         for i in range(num_images):
             vutils.save_image(fake[i], path + 'image_' + str(i) + '.png')
+
+    def log_to_csv(self, run_address):
+        data = pd.read_csv(run_address, delimiter=' ')
+        data = data.applymap(lambda x: re.sub('[^0-9]', '', str(x)))
+        data = data.apply(pd.to_numeric, errors='coerce')
+        data.columns = ['epoch', 'G_loss', 'D_loss']
+        data.to_csv(run_address[:-4] + '.csv', index=False)
 
     def weight_initializer(self, m):
         """
@@ -384,11 +396,11 @@ if __name__ == '__main__':
     # batch_visualizer(device, dataloader, number_of_images=64)
 
     model = GAN(device=device, ngpu=ngpu)
-    run_name = 'run_2023-06-20_14-20-30'
-    model.load_model(result_root + run_name + '/epoch_40/')
+    run_name = 'run_2023-06-27_11-29-00'
+    model.load_model(result_root + run_name + '/current/')
     model.train(dataloader=dataloader,
                 device=device,
-                num_epochs=100,
+                num_epochs=200,
                 verbose=1,
                 nz=nz,
                 lr=lr,
@@ -398,4 +410,4 @@ if __name__ == '__main__':
                 result_root=result_root
                 )
 
-    # model.generate_images(num_images=10, path=result_root + run_name + '/generated_images/')
+    # model.generate_images(num_images=100, path=result_root + run_name + '/generated_images/')
