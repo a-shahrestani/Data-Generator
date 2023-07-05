@@ -25,7 +25,7 @@ torch.manual_seed(manualSeed)
 torch.use_deterministic_algorithms(True)  # Needed for reproducible results
 
 # Root directory for dataset
-data_root = '../../../datasets/Celeba/'
+data_root = '../../data/DSPS23 Pavement/Task 1 Crack Type/training_data/ts1/images/'
 
 # Result directory
 result_root = './results/'
@@ -34,7 +34,7 @@ result_root = './results/'
 workers = 2
 
 # Batch size during training
-batch_size = 128
+batch_size = 32
 
 # Spatial size of training images. All images will be resized to this
 #   size using a transformer.
@@ -293,13 +293,14 @@ class GAN:
                 if epoch % checkpoint_interval == 0:
                     os.mkdir(run_path + '/epoch_' + str(epoch))
                     self.save_model(run_path + '/epoch_' + str(epoch) + '/')  # The model is saved
+                    if generate_images:
+                        self.generate_images(100, run_path + '/epoch_' + str(epoch) + '/generated_images/')
 
             # Log every epoch
             with open(run_path + '/log.txt', 'a') as f:
                 f.write(f'Epoch: {epoch} G_loss: {self.G_losses_mean[-1]} D_loss: {self.D_losses_mean[-1]} \n')
+
         # self.log_to_csv(run_path + '/log.txt')
-        if generate_images:
-            self.generate_images(100, run_path + '/generated_images/')
 
     def generate_images(self, num_images, path):
         """
@@ -396,18 +397,20 @@ if __name__ == '__main__':
     # batch_visualizer(device, dataloader, number_of_images=64)
 
     model = GAN(device=device, ngpu=ngpu)
-    run_name = 'run_2023-06-27_11-29-00'
-    model.load_model(result_root + run_name + '/current/')
+    # run_name = 'run_2023-06-30_13-13-23'
+    # model.load_model(result_root + run_name + '/current/')
     model.train(dataloader=dataloader,
                 device=device,
-                num_epochs=200,
-                verbose=1,
+                num_epochs=20000,
+                verbose=2,
                 nz=nz,
                 lr=lr,
                 beta1=beta1,
                 save_checkpoint=True,
-                checkpoint_interval=10,
-                result_root=result_root
+                checkpoint_interval=50,
+                result_root=result_root,
+                generate_images=True
                 )
 
     # model.generate_images(num_images=100, path=result_root + run_name + '/generated_images/')
+#
