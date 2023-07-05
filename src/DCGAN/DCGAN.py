@@ -19,16 +19,16 @@ import matplotlib.pyplot as plt
 # Set random seed for reproducibility
 manualSeed = 999
 # manualSeed = random.randint(1, 10000) # use if you want new results
-print("Random Seed: ", manualSeed)
+# print("Random Seed: ", manualSeed)
 random.seed(manualSeed)
 torch.manual_seed(manualSeed)
 torch.use_deterministic_algorithms(True)  # Needed for reproducible results
 
 # Root directory for dataset
-data_root = '../../data/DSPS23 Pavement/Task 1 Crack Type/training_data/ts1/images/'
+data_root = '../../../datasets/DSPS23 Pavement/Task 1 Crack Type/training_data/ts1/images/'
 
 # Result directory
-result_root = './results/'
+result_root = './results/DCGAN/'
 
 # Number of workers for dataloader
 workers = 2
@@ -41,22 +41,22 @@ batch_size = 32
 image_size = 64
 
 # Number of channels in the training images. For color images this is 3 (RGB) For grayscale images this is 1
-nc = 3
+nc = 1
 
 # Size of z latent vector (i.e. size of generator input)
 nz = 100
 
 # Size of feature maps in generator
-ngf = 64
+ngf = 128
 
 # Size of feature maps in discriminator
-ndf = 64
+ndf = 128
 
 # Number of training epochs
 num_epochs = 5
 
 # Learning rate for optimizers
-lr = 0.001
+lr = 0.00005
 
 # Beta1 hyperparameter for Adam optimizers
 beta1 = 0.5
@@ -131,11 +131,11 @@ class Discriminator(nn.Module):
             nn.BatchNorm2d(ndf * 2),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf*2) x 16 x 16
-            nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),  # 32x32
+            nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),  # 8x8
             nn.BatchNorm2d(ndf * 4),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf*4) x 8 x 8
-            nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False),  # 64x64
+            nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False),  # 4x4
             nn.BatchNorm2d(ndf * 8),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf*8) x 4 x 4
@@ -383,9 +383,11 @@ if __name__ == '__main__':
     # Create the dataset
     dataset = dset.ImageFolder(root=data_root, transform=transforms.Compose([
         transforms.Resize(image_size),
+        transforms.Grayscale(num_output_channels=1),
         transforms.CenterCrop(image_size),
         transforms.ToTensor(),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]))
+        transforms.Normalize((0.5), (0.5))] # changed to a single channel
+    ))
 
     # Creating the dataloader
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=workers)
