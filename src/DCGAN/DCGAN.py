@@ -28,7 +28,7 @@ torch.use_deterministic_algorithms(True)  # Needed for reproducible results
 data_root = '../../../datasets/DSPS23 Pavement/Task 1 Crack Type/training_data/ts1/images/'
 
 # Result directory
-result_root = './results/DCGAN/'
+result_root = './results/'
 
 # Number of workers for dataloader
 workers = 2
@@ -294,7 +294,8 @@ class GAN:
                     os.mkdir(run_path + '/epoch_' + str(epoch))
                     self.save_model(run_path + '/epoch_' + str(epoch) + '/')  # The model is saved
                     if generate_images:
-                        self.generate_images(100, run_path + '/epoch_' + str(epoch) + '/generated_images/')
+                        self.generate_images(100, run_path + '/epoch_' + str(epoch) + '/generated_images/',
+                                             denormalize=True)  # The images are generated
 
             # Log every epoch
             with open(run_path + '/log.txt', 'a') as f:
@@ -302,7 +303,7 @@ class GAN:
 
         # self.log_to_csv(run_path + '/log.txt')
 
-    def generate_images(self, num_images, path):
+    def generate_images(self, num_images, path, denormalize=False):
         """
         Usage: Generates images with the generator
         :param num_images: number of images to generate
@@ -316,7 +317,10 @@ class GAN:
             fake = self.netG(noise).detach().cpu()
         # Save images
         for i in range(num_images):
-            vutils.save_image(fake[i], path + 'image_' + str(i) + '.png')
+            if denormalize:
+                vutils.save_image(fake[i] * 0.5 + 0.5, path + 'image_' + str(i) + '.png')
+            else:
+                vutils.save_image(fake[i], path + 'image_' + str(i) + '.png')
 
     def log_to_csv(self, run_address):
         data = pd.read_csv(run_address, delimiter=' ')
@@ -377,6 +381,10 @@ class GAN:
         plt.imshow(np.transpose(self.img_list[-1], (1, 2, 0)))
         plt.show()
 
+    def denorm(self, x):
+        out = (x + 1) / 2
+        return out.clamp(0, 1)
+
 
 if __name__ == '__main__':
     # We can use an image folder dataset the way we have it setup.
@@ -386,7 +394,7 @@ if __name__ == '__main__':
         transforms.Grayscale(num_output_channels=1),
         transforms.CenterCrop(image_size),
         transforms.ToTensor(),
-        transforms.Normalize((0.5), (0.5))] # changed to a single channel
+        transforms.Normalize((0.5), (0.5))]  # changed to a single channel
     ))
 
     # Creating the dataloader
@@ -399,8 +407,8 @@ if __name__ == '__main__':
     # batch_visualizer(device, dataloader, number_of_images=64)
 
     model = GAN(device=device, ngpu=ngpu)
-    # run_name = 'run_2023-06-30_13-13-23'
-    # model.load_model(result_root + run_name + '/current/')
+    run_name = 'run_2023-07-05_12-21-15'
+    model.load_model(result_root + run_name + '/current/')
     model.train(dataloader=dataloader,
                 device=device,
                 num_epochs=20000,
@@ -414,5 +422,5 @@ if __name__ == '__main__':
                 generate_images=True
                 )
 
-    # model.generate_images(num_images=100, path=result_root + run_name + '/generated_images/')
+    # model.generate_images(num_images=100, path=result_root + run_name + '/generated_images/',denormalize=True)
 #

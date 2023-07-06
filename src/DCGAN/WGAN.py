@@ -284,14 +284,15 @@ class GAN:
                         if show_comparison_flag:
                             self.side_by_side_comparison(dataloader, save_flag=True, show_flag=False,
                                                          save_path=run_path + '/generated_images/')
-                        self.generate_images(100, run_path + '/generated_images/')
+
+                        self.generate_images(100, run_path + '/generated_images/',denormalize=True)
 
             # Log every epoch
             with open(run_path + '/log.txt', 'a') as f:
                 f.write(f'Epoch: {epoch} G_loss: {self.G_losses_mean[-1]} D_loss: {self.D_losses_mean[-1]} \n')
         # self.log_to_csv(run_path + '/log.txt')
 
-    def generate_images(self, num_images, path):
+    def generate_images(self, num_images, path, denormalize=False):
         """
         Usage: Generates images with the generator
         :param num_images: number of images to generate
@@ -305,7 +306,10 @@ class GAN:
             fake = self.netG(noise).detach().cpu()
         # Save images
         for i in range(num_images):
-            vutils.save_image(fake[i], path + 'image_' + str(i) + '.png')
+            if denormalize:
+                vutils.save_image(fake[i] * 0.5 + 0.5, path + 'image_' + str(i) + '.png')
+            else:
+                vutils.save_image(fake[i], path + 'image_' + str(i) + '.png')
 
     # def log_to_csv(self, run_address):
     #     data = pd.read_csv(run_address, delimiter=' ')
