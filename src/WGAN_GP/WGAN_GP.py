@@ -22,7 +22,7 @@ manualSeed = 999
 # print("Random Seed: ", manualSeed)
 random.seed(manualSeed)
 torch.manual_seed(manualSeed)
-torch.use_deterministic_algorithms(True)  # Needed for reproducible results
+# torch.use_deterministic_algorithms(True)  # Needed for reproducible results
 
 # Root directory for dataset
 data_root = '../datasets/Total_Crack/'
@@ -194,21 +194,19 @@ class WGAN_GP:
         # For each epoch
         for epoch in range(num_epochs):
             # for each batch in the dataloader
-            for i, data in enumerate(dataloader, 0):
+            for i, data in enumerate(dataloader):
                 # (1) Update D network: maximize log(D(x)) + log(1 - D(G(z))) #########################################
                 # First the discriminator is trained for critic_iterations times
+                img = data[0].to(device)
                 for _ in range(critic_iterations):
-
-                    z = torch.normal(0, 0.1, size=(data.size(0), nz, 1, 1))
-                    if torch.cuda.is_available():
-                        img, z = data.cuda(), z.cuda()
+                    z = torch.normal(0, 0.1, size=(img.size(0), nz, 1, 1)).to(device)
 
                     # train D
                     self.netD.zero_grad()
                     loss_real = -self.netD(img).mean()
                     fake_img = self.netG(z).detach()
                     loss_fake = self.netD(fake_img).mean()
-                    gp = self.gradient_penalty(data.detach(), fake_img, LAMDA=10, cuda=torch.cuda.is_available())
+                    gp = self.gradient_penalty(img.detach(), fake_img, LAMDA=10, cuda=torch.cuda.is_available())
                     loss_D = loss_real + loss_fake + gp
                     loss_D.backward()
                     optimizerD.step()
@@ -229,7 +227,7 @@ class WGAN_GP:
                     # Output training stats
                     print(
                         f'[Epoch {epoch + 1}/{num_epochs}] [G loss: {loss_G.item()}] [D loss: {loss_D.item()} | '
-                        f'loss_real: {loss_real.item()} loss_fake: {loss_fake.item()}]')
+                        f'loss_real: {loss_real.item()} loss_fake: {loss_fake.item()}] | Batch {i + 1}/{len(dataloader)}')
                     # Check how the generator is doing by saving G's output on fixed_noise
                     if (iters % 500 == 0) or ((epoch == num_epochs - 1) and (i == len(dataloader) - 1)):
                         with torch.no_grad():  # No gradients are calculated saving memory and time
@@ -395,7 +393,7 @@ if __name__ == '__main__':
     model.train(dataloader=dataloader,
                 device=device,
                 num_epochs=1000,
-                verbose=2,
+                verbose=1,
                 nz=nz,
                 lr=lr,
                 beta1=beta1,
