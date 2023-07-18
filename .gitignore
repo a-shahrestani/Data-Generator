@@ -1,4 +1,6 @@
 /venv/
 /.idea/
 /src/DCGAN/results/
+/src/WGAN/results/
 /data/
+/src/WGAN_GP/results/

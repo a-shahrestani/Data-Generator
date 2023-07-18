@@ -1,5 +1,6 @@
 # %matplotlib inline
 import datetime
+import math
 import os
 import random
 import re
@@ -25,10 +26,10 @@ torch.manual_seed(manualSeed)
 torch.use_deterministic_algorithms(True)  # Needed for reproducible results
 
 # Root directory for dataset
-data_root = '../../../datasets/DSPS23 Pavement/Task 1 Crack Type/training_data/ts1/images/'
+data_root = '../datasets/Total_Crack/'
 
 # Result directory
-result_root = './results/'
+result_root = './src/DCGAN/results/'
 
 # Number of workers for dataloader
 workers = 2
@@ -38,7 +39,7 @@ batch_size = 32
 
 # Spatial size of training images. All images will be resized to this
 #   size using a transformer.
-image_size = 64
+image_size = 256
 
 # Number of channels in the training images. For color images this is 3 (RGB) For grayscale images this is 1
 nc = 1
@@ -86,31 +87,50 @@ class Generator(nn.Module):
         super(Generator, self).__init__()
         self.ngpu = ngpu
         # the generator model architecture is defined here
+        modules = []
+        modules.append(nn.ConvTranspose2d(nz, ngf * ngf // 4, 4, 1, 0, bias=False))
+        modules.append(nn.BatchNorm2d(ngf * ngf // 4))
+        modules.append(nn.ReLU(True))
+        for i in reversed(range(int(math.log2(ngf // 4)))):
+            modules.append(nn.ConvTranspose2d(ngf * 2 ** (i + 1), ngf * 2 ** i, 4, 2, 1, bias=False))
+            modules.append(nn.BatchNorm2d(ngf * 2 ** i))
+            modules.append(nn.ReLU(True))
+        modules.append(nn.ConvTranspose2d(ngf, nc, 4, 2, 1, bias=False))
+        modules.append(nn.Tanh())
         self.main = nn.Sequential(
-            # input is Z, going into a convolution. nz is the vector size of the latent space for each image
-            # ngf is the number of feature maps in the generator.
-            # Feature maps are like channels in the image. So this number goes down as the network gets deeper
-            # since we are reducing the number of channels to get to the number of channels in the image
-            # nc is the number of channels in the final image
-            nn.ConvTranspose2d(nz, ngf * 8, 4, 1, 0, bias=False),  # 4x4
-            nn.BatchNorm2d(ngf * 8),
-            nn.ReLU(True),
-            # state size. (ngf*8) x 4 x 4
-            nn.ConvTranspose2d(ngf * 8, ngf * 4, 4, 2, 1, bias=False),  # 8x8
-            nn.BatchNorm2d(ngf * 4),
-            nn.ReLU(True),
-            # state size. (ngf*4) x 8 x 8
-            nn.ConvTranspose2d(ngf * 4, ngf * 2, 4, 2, 1, bias=False),  # 16x16
-            nn.BatchNorm2d(ngf * 2),
-            nn.ReLU(True),
-            # state size. (ngf*2) x 16 x 16
-            nn.ConvTranspose2d(ngf * 2, ngf, 4, 2, 1, bias=False),  # 32x32
-            nn.BatchNorm2d(ngf),
-            nn.ReLU(True),
-            # state size. (ngf) x 32 x 32
-            nn.ConvTranspose2d(ngf, nc, 4, 2, 1, bias=False),  # 64x64
-            nn.Tanh()
-            # state size. (nc) x 64 x 64
+            # # input is Z, going into a convolution. nz is the vector size of the latent space for each image
+            # # ngf is the number of feature maps in the generator.
+            # # Feature maps are like channels in the image. So this number goes down as the network gets deeper
+            # # since we are reducing the number of channels to get to the number of channels in the image
+            # # nc is the number of channels in the final image
+            # nn.ConvTranspose2d(nz, ngf * 32, 4, 1, 0, bias=False),  # 4x4
+            # nn.BatchNorm2d(ngf * 32),
+            # nn.ReLU(True),
+            #
+            # nn.ConvTranspose2d(ngf * 32, ngf * 16, 4, 2, 1, bias=False),  # 8x8
+            # nn.BatchNorm2d(ngf * 16),
+            # nn.ReLU(True),
+            #
+            # nn.ConvTranspose2d(ngf * 16, ngf * 8, 4, 2, 1, bias=False),  # 16x16
+            # nn.BatchNorm2d(ngf * 8),
+            # nn.ReLU(True),
+            # # state size. (ngf*8) x 4 x 4
+            # nn.ConvTranspose2d(ngf * 8, ngf * 4, 4, 2, 1, bias=False),  # 32x32
+            # nn.BatchNorm2d(ngf * 4),
+            # nn.ReLU(True),
+            # # state size. (ngf*4) x 8 x 8
+            # nn.ConvTranspose2d(ngf * 4, ngf * 2, 4, 2, 1, bias=False),  # 64x64
+            # nn.BatchNorm2d(ngf * 2),
+            # nn.ReLU(True),
+            # # state size. (ngf*2) x 16 x 16
+            # nn.ConvTranspose2d(ngf * 2, ngf, 4, 2, 1, bias=False),  # 128x128
+            # nn.BatchNorm2d(ngf),
+            # nn.ReLU(True),
+            # # state size. (ngf) x 32 x 32
+            # nn.ConvTranspose2d(ngf, nc, 4, 2, 1, bias=False),  # 256x256
+            # nn.Tanh()
+            # # state size. (nc) x 64 x 64
+            *modules
         )
 
     def forward(self, input):
@@ -122,25 +142,44 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
         self.ngpu = ngpu
         # the discriminator model architecture is defined here
+        modules = []
+        modules.append(nn.Conv2d(nc, ndf, 4, 2, 1, bias=False))
+        modules.append(nn.LeakyReLU(0.2, inplace=True))
+        for i in range(int(math.log2(ndf // 4))):
+            modules.append(nn.Conv2d(ndf * 2 ** i, ndf * 2 ** (i + 1), 4, 2, 1, bias=False))
+            modules.append(nn.BatchNorm2d(ndf * 2 ** (i + 1)))
+            modules.append(nn.LeakyReLU(0.2, inplace=True))
+        modules.append(nn.Conv2d(ndf * ndf // 4, 1, 4, 1, 0, bias=False))
+        modules.append(nn.Sigmoid())
         self.main = nn.Sequential(
-            # input is (nc) x 64 x 64 because our images are 64 * 64 * 3
-            nn.Conv2d(nc, ndf, 4, 2, 1, bias=False),  # 32x32
-            nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf) x 32 x 32
-            nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),  # 16x16
-            nn.BatchNorm2d(ndf * 2),
-            nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*2) x 16 x 16
-            nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),  # 8x8
-            nn.BatchNorm2d(ndf * 4),
-            nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*4) x 8 x 8
-            nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False),  # 4x4
-            nn.BatchNorm2d(ndf * 8),
-            nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*8) x 4 x 4
-            nn.Conv2d(ndf * 8, 1, 4, 1, 0, bias=False),
-            nn.Sigmoid()
+            # # input is (nc) x 512 x 512 because our images are 512 * 512 * 3
+            # nn.Conv2d(nc, ndf, 4, 2, 1, bias=False),  # 128x128
+            # nn.LeakyReLU(0.2, inplace=True),
+            # # state size. (ndf) x 256 x 256
+            # nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),  # 64x64
+            # nn.BatchNorm2d(ndf * 2),
+            # nn.LeakyReLU(0.2, inplace=True),
+            # # state size. (ndf) x 128 x 128
+            # nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),  # 64x64
+            # nn.BatchNorm2d(ndf * 4),
+            # nn.LeakyReLU(0.2, inplace=True),
+            # # state size. (ndf*2) x 64 x 64
+            # nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False),  # 32x32
+            # nn.BatchNorm2d(ndf * 8),
+            # nn.LeakyReLU(0.2, inplace=True),
+            # # state size. (ndf*4) x 8 x 8
+            # nn.Conv2d(ndf * 8, ndf * 16, 4, 2, 1, bias=False),  # 16x16
+            # nn.BatchNorm2d(ndf * 16),
+            # nn.LeakyReLU(0.2, inplace=True),
+            # # state size. (ndf*4) x 8 x 8
+            # nn.Conv2d(ndf * 16, ndf * 32, 4, 2, 1, bias=False),  # 64x64
+            # nn.BatchNorm2d(ndf * 32),
+            # nn.LeakyReLU(0.2, inplace=True),
+            # # state size. (ndf*4) x 8 x 8
+            #
+            # nn.Conv2d(ndf * 32, 1, 4, 1, 0, bias=False),  # 1x1
+            # nn.Sigmoid()
+            *modules
         )
 
     def forward(self, input):
@@ -343,13 +382,17 @@ class GAN:
 
     def save_model(self, path):
         # Saving the model
-        torch.save(self.netG, path + 'generator.rar')
-        torch.save(self.netD, path + 'discriminator.rar')
+        torch.save(self.netG.state_dict(), path + 'generator.pth')
+        torch.save(self.netD.state_dict(), path + 'discriminator.pth')
 
-    def load_model(self, path):
+    def load_model(self, path, ngpu, device):
         # Loading the model
-        self.netG = torch.load(path + 'generator.rar')
-        self.netD = torch.load(path + 'discriminator.rar')
+        self.netG = Generator(ngpu).to(device)
+        self.netG.load_state_dict(path + 'generator.pth')
+        self.netD = Discriminator(ngpu).to(device)
+        self.netD.load_state_dict(path + 'discriminator.pth')
+        # self.netG= torch.load(path + 'generator.rar', map_location=device)
+        # self.netD = torch.load(path + 'discriminator.rar', map_location=device)
 
     def result_visualization(self):
         # Visualization of the results
@@ -407,20 +450,20 @@ if __name__ == '__main__':
     # batch_visualizer(device, dataloader, number_of_images=64)
 
     model = GAN(device=device, ngpu=ngpu)
-    run_name = 'run_2023-07-05_12-21-15'
-    model.load_model(result_root + run_name + '/current/')
+    # run_name = 'run_2023-07-06_15-13-00'
+    # model.load_model(result_root + run_name + '/current/', ngpu, device)
     model.train(dataloader=dataloader,
                 device=device,
-                num_epochs=20000,
+                num_epochs=1000,
                 verbose=2,
                 nz=nz,
                 lr=lr,
                 beta1=beta1,
                 save_checkpoint=True,
-                checkpoint_interval=50,
+                checkpoint_interval=100,
                 result_root=result_root,
                 generate_images=True
                 )
 
-    # model.generate_images(num_images=100, path=result_root + run_name + '/generated_images/',denormalize=True)
+    # model.generate_images(num_images=100, path=result_root + run_name + '/generated_images/', denormalize=True)
 #
