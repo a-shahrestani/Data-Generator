@@ -1,5 +1,5 @@
+# %matplotlib inline
 import datetime
-import math
 import os
 import random
 import re
@@ -13,22 +13,24 @@ import torch.utils.data
 import torchvision.datasets as dset
 import torchvision.transforms as transforms
 import torchvision.utils as vutils
+from torcheval.metrics import BinaryAccuracy
 import numpy as np
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 # Set random seed for reproducibility
 manualSeed = 999
 # manualSeed = random.randint(1, 10000) # use if you want new results
-# print("Random Seed: ", manualSeed)
+print("Random Seed: ", manualSeed)
 random.seed(manualSeed)
 torch.manual_seed(manualSeed)
-# torch.use_deterministic_algorithms(True)  # Needed for reproducible results
+torch.use_deterministic_algorithms(True)  # Needed for reproducible results
 
 # Root directory for dataset
-data_root = '../datasets/Total_Crack/'
+data_root = '../datasets/DSPS23 Pavement/Task 1 Crack Type/training_data/ts1/images/'
 
 # Result directory
-result_root = './src/WGAN_GP/results/'
+result_root = './src/WGAN/results/'
 
 # Number of workers for dataloader
 workers = 2
@@ -86,22 +88,40 @@ class Generator(nn.Module):
         super(Generator, self).__init__()
         self.ngpu = ngpu
         # the generator model architecture is defined here
-        # # input is Z, going into a convolution. nz is the vector size of the latent space for each image
-        # # ngf is the number of feature maps in the generator.
-        # # Feature maps are like channels in the image. So this number goes down as the network gets deeper
-        # # since we are reducing the number of channels to get to the number of channels in the image
-        # # nc is the number of channels in the final image
-        modules = []
-        modules.append(nn.ConvTranspose2d(nz, ngf * ngf // 4, 4, 1, 0, bias=False))
-        modules.append(nn.BatchNorm2d(ngf * ngf // 4))
-        modules.append(nn.ReLU(True))
-        for i in reversed(range(int(math.log2(ngf // 4)))):
-            modules.append(nn.ConvTranspose2d(ngf * 2 ** (i + 1), ngf * 2 ** i, 4, 2, 1, bias=False))
-            modules.append(nn.BatchNorm2d(ngf * 2 ** i))
-            modules.append(nn.ReLU(True))
-        modules.append(nn.ConvTranspose2d(ngf, nc, 4, 2, 1, bias=False))
-        modules.append(nn.Tanh())
-        self.main = nn.Sequential(*modules)
+        self.main = nn.Sequential(
+            # input is Z, going into a convolution. nz is the vector size of the latent space for each image
+            # ngf is the number of feature maps in the generator.
+            # Feature maps are like channels in the image. So this number goes down as the network gets deeper
+            # since we are reducing the number of channels to get to the number of channels in the image
+            # nc is the number of channels in the final image
+            nn.ConvTranspose2d(nz, ngf * 32, 4, 1, 0, bias=False),  # 4x4
+            nn.BatchNorm2d(ngf * 32),
+            nn.ReLU(True),
+
+            nn.ConvTranspose2d(ngf * 32, ngf * 16, 4, 2, 1, bias=False),  # 8x8
+            nn.BatchNorm2d(ngf * 16),
+            nn.ReLU(True),
+
+            nn.ConvTranspose2d(ngf * 16, ngf * 8, 4, 2, 1, bias=False),  # 16x16
+            nn.BatchNorm2d(ngf * 8),
+            nn.ReLU(True),
+            # state size. (ngf*8) x 4 x 4
+            nn.ConvTranspose2d(ngf * 8, ngf * 4, 4, 2, 1, bias=False),  # 32x32
+            nn.BatchNorm2d(ngf * 4),
+            nn.ReLU(True),
+            # state size. (ngf*4) x 8 x 8
+            nn.ConvTranspose2d(ngf * 4, ngf * 2, 4, 2, 1, bias=False),  # 64x64
+            nn.BatchNorm2d(ngf * 2),
+            nn.ReLU(True),
+            # state size. (ngf*2) x 16 x 16
+            nn.ConvTranspose2d(ngf * 2, ngf, 4, 2, 1, bias=False),  # 128x128
+            nn.BatchNorm2d(ngf),
+            nn.ReLU(True),
+            # state size. (ngf) x 32 x 32
+            nn.ConvTranspose2d(ngf, nc, 4, 2, 1, bias=False),  # 256x256
+            nn.Tanh()
+            # state size. (nc) x 64 x 64
+        )
 
     def forward(self, input):
         return self.main(input)
@@ -112,31 +132,49 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
         self.ngpu = ngpu
         # the discriminator model architecture is defined here
-        modules = []
-        modules.append(nn.Conv2d(nc, ndf, 4, 2, 1, bias=False))
-        modules.append(nn.LeakyReLU(0.2, inplace=True))
-        for i in range(int(math.log2(ndf // 4))):
-            modules.append(nn.Conv2d(ndf * 2 ** i, ndf * 2 ** (i + 1), 4, 2, 1, bias=False))
-            # Can be commented out to remove instance norm
-            modules.append(nn.InstanceNorm2d(ndf * 2 ** (i + 1), affine=True))
-            modules.append(nn.LeakyReLU(0.2, inplace=True))
-        modules.append(nn.Conv2d((ndf * ndf // 4), 1, 4, 1, 0, bias=False))
-        self.main = nn.Sequential(*modules)
+        self.main = nn.Sequential(
+            # input is (nc) x 256 x 256 because our images are 256 * 256 * 1
+            nn.Conv2d(nc, ndf, 4, 2, 1, bias=False),  # 128x128
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf) x 128 x 128
+            nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),  # 64x64
+            nn.InstanceNorm2d(ndf * 2, affine=True),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*2) x 64 x 64
+            nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),  # 32x32
+            nn.InstanceNorm2d(ndf * 4, affine=True),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*4) x 8 x 8
+            nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False),  # 16x16
+            nn.InstanceNorm2d(ndf * 8, affine=True),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*4) x 8 x 8
+            nn.Conv2d(ndf * 8, ndf * 16, 4, 2, 1, bias=False),  # 64x64
+            nn.InstanceNorm2d(ndf * 16, affine=True),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*4) x 8 x 8
+            nn.Conv2d(ndf * 16, ndf * 32, 4, 2, 1, bias=False),  # 64x64
+            nn.InstanceNorm2d(ndf * 32, affine=True),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*8) x 4 x 4
+            nn.Conv2d(ndf * 32, 1, 4, 1, 0, bias=False),
+        )
 
     def forward(self, input):
         return self.main(input)
 
 
-class WGAN_GP:
+class WGAN:
     def __init__(self, device, ngpu, nz=100):
         # Create the generator and initialize the weights
         self.netG = Generator(ngpu).to(device)
         self.netG.apply(self.weight_initializer)
         # Create the Discriminator and initialize the weights
-        self.netD = Discriminator(ngpu).to(device)
-        self.netD.apply(self.weight_initializer)
-        # Initialize BCELoss function for the GAN
-        self.criterion = nn.BCELoss()
+        self.critic = Discriminator(ngpu).to(device)
+        self.critic.apply(self.weight_initializer)
+        # Initialize BCEWithLogitsLoss function for the GAN since the last layer of the discriminator is a linear layer
+        self.criterion = nn.BCEWithLogitsLoss()
+
         # Latent vector to visualize the progression of the generator
         self.nz = nz
         # Lists to keep track of progress
@@ -148,6 +186,17 @@ class WGAN_GP:
         self.G_losses_mean = None
         self.D_losses_mean = None
 
+    def get_noise(self, n_samples, noise_dim, device='cpu'):
+        '''
+        Generate noise vectors from the random normal distribution with dimensions (n_samples, noise_dim),
+        where
+            n_samples: the number of samples to generate based on  batch_size
+            noise_dim: the dimension of the noise vector
+            device: device type can be cuda or cpu
+        '''
+
+        return torch.randn(n_samples, noise_dim, 1, 1, device=device)
+
     def train(self, dataloader,
               device,
               nz,
@@ -158,8 +207,7 @@ class WGAN_GP:
               save_checkpoint=True,
               result_root=None,
               checkpoint_interval=1,
-              critic_iterations=5,
-              generate_images=False):
+              generate_images=False, show_comparison_flag=False):
         # Create batch of latent vectors that we will use to visualize the progression of the generator
         fixed_noise = torch.randn(64, nz, 1, 1, device=device)
 
@@ -167,10 +215,16 @@ class WGAN_GP:
         real_label = 1.0
         fake_label = 0.0
 
-        # Adam Optimizer for both the generator and the discriminator as per the DCGAN paper
-        optimizerG = optim.Adam(self.netG.parameters(), lr=lr, betas=(beta1, 0.999))
-        optimizerD = optim.Adam(self.netD.parameters(), lr=lr, betas=(beta1, 0.999))
+        # Optimizers for the generator and the discriminator
+        gen_opt = torch.optim.RMSprop(self.netG.parameters(), lr=lr)
+        critic_opt = torch.optim.RMSprop(self.critic.parameters(), lr=lr)
 
+        # Critic training iterations are different from the generator training iterations. We train it more
+
+        cur_step = 0
+        display_step = 500
+        CRITIC_ITERATIONS = 5
+        WEIGHT_CLIP = 0.01
         # Training Loop
 
         # First a batch of real images are created and then a batch of fake images are created Loss is calculated for
@@ -193,50 +247,45 @@ class WGAN_GP:
         # For each epoch
         for epoch in range(num_epochs):
             # for each batch in the dataloader
-            for i, data in enumerate(dataloader):
-                # (1) Update D network: maximize log(D(x)) + log(1 - D(G(z))) #########################################
-                # First the discriminator is trained for critic_iterations times
-                img = data[0].to(device)
-                for _ in range(critic_iterations):
-                    z = torch.normal(0, 0.1, size=(img.size(0), nz, 1, 1)).to(device)
+            # Dataloader returns the batches
+            for real_image, _ in tqdm(dataloader):
+                cur_batch_size = real_image.shape[0]
 
-                    # train D
-                    self.netD.zero_grad()
-                    loss_real = -self.netD(img).mean()
-                    fake_img = self.netG(z).detach()
-                    loss_fake = self.netD(fake_img).mean()
-                    gp = self.gradient_penalty(img.detach(), fake_img, LAMDA=0.2, cuda=torch.cuda.is_available())
-                    loss_D = loss_real + loss_fake + gp
-                    loss_D.backward()
-                    optimizerD.step()
+                real_image = real_image.to(device)
+                # Train Critic more than the generator for reliable gradients
+                for _ in range(CRITIC_ITERATIONS):
+                    fake_noise = self.get_noise(cur_batch_size, nz, device=device)
+                    fake = self.netG(fake_noise)
+                    critic_fake_pred = self.critic(fake).reshape(-1)
+                    critic_real_pred = self.critic(real_image).reshape(-1)
+                    # claculate the critic loss
+                    critic_loss = -(torch.mean(critic_real_pred) - torch.mean(critic_fake_pred))
+                    self.critic.zero_grad()
+                    # To make a backward pass and retain the intermediary results
+                    critic_loss.backward(retain_graph=True)
+                    # Update optimizer
+                    critic_opt.step()
 
-                # train G
-                z = torch.normal(0, 1, size=(img.size(0), nz, 1, 1))
-                if torch.cuda.is_available():
-                    z = z.cuda()
+                    # clip critic weights between -0.01, 0.01
+                    for p in self.critic.parameters():
+                        p.data.clamp_(-WEIGHT_CLIP, WEIGHT_CLIP)
+                # Train Generator: min E[critic(fake)]
+                gen_fake = self.critic(fake).reshape(-1)
+                gen_loss = torch.mean(gen_fake)
                 self.netG.zero_grad()
-                loss_G = -self.netD(self.netG(z)).mean()
-                loss_G.backward()
-                optimizerG.step()
+                gen_loss.backward()
+                # Update optimizer
+                gen_opt.step()
+                self.D_losses.append(critic_loss.item())
+                self.G_losses.append(gen_loss.item())
+                ## Visualization code ##
+                if cur_step % display_step == 0 and cur_step > 0:
+                    print(f"Step {cur_step}: Generator loss: {gen_loss}, critic loss: {critic_loss}")
+                    self.img_list.append(vutils.make_grid(fake, padding=2, normalize=True))
 
-                self.D_losses.append(loss_D.item())
-                self.G_losses.append(loss_G.item())
-
-                if verbose == 1:
-                    # Output training stats
-                    print(
-                        f'[Epoch {epoch + 1}/{num_epochs}] [G loss: {loss_G.item()}] [D loss: {loss_D.item()} | '
-                        f'loss_real: {loss_real.item()} loss_fake: {loss_fake.item()}] | Batch {i + 1}/{len(dataloader)}')
-                    # Check how the generator is doing by saving G's output on fixed_noise
-                    if (iters % 500 == 0) or ((epoch == num_epochs - 1) and (i == len(dataloader) - 1)):
-                        with torch.no_grad():  # No gradients are calculated saving memory and time
-                            fake = self.netG(fixed_noise).detach().cpu()
-                        self.img_list.append(
-                            vutils.make_grid(fake, padding=2, normalize=True))  # The fake images are saved
-                if verbose == 2:
-                    print(f'Epoch {epoch + 1}/{num_epochs} Batch {i + 1}/{len(dataloader)}')
-                # Saving losses for plotting later
-                iters += 1
+                    gen_loss = 0
+                    critic_loss = 0
+                cur_step += 1
             self.G_losses_mean = np.append(self.G_losses_mean, np.mean(self.G_losses[-len(dataloader):]))
             self.D_losses_mean = np.append(self.D_losses_mean, np.mean(self.D_losses[-len(dataloader):]))
             # Save model checkpoints by epoch interval
@@ -248,37 +297,17 @@ class WGAN_GP:
                     os.mkdir(run_path + '/epoch_' + str(epoch))
                     self.save_model(run_path + '/epoch_' + str(epoch) + '/')  # The model is saved
                     if generate_images:
+                        if show_comparison_flag:
+                            self.side_by_side_comparison(dataloader, save_flag=True, show_flag=False,
+                                                         save_path=run_path + '/generated_images/')
+
                         self.generate_images(100, run_path + '/epoch_' + str(epoch) + '/generated_images/',
                                              denormalize=True)  # The images are generated
 
             # Log every epoch
             with open(run_path + '/log.txt', 'a') as f:
                 f.write(f'Epoch: {epoch} G_loss: {self.G_losses_mean[-1]} D_loss: {self.D_losses_mean[-1]} \n')
-
         # self.log_to_csv(run_path + '/log.txt')
-
-    def gradient_penalty(self, real_img, fake_img, LAMDA=10, cuda=True):
-        b_size = real_img.size(0)
-        alpha = torch.rand(b_size, 1)
-        alpha = alpha.expand(b_size, real_img.nelement() // b_size).reshape(real_img.shape)
-        if cuda:
-            alpha = alpha.cuda()
-        x = (alpha * real_img + (1 - alpha) * fake_img).requires_grad_(True)
-        if cuda:
-            x = x.cuda()
-        out = self.netD(x)
-
-        grad_outputs = torch.ones(out.shape)
-        if cuda:
-            grad_outputs = grad_outputs.cuda()
-
-        gradients = \
-            torch.autograd.grad(outputs=out, inputs=x, grad_outputs=grad_outputs, create_graph=True, only_inputs=True,
-                                retain_graph=True)[
-                0]
-        gradients = gradients.reshape(b_size, -1)
-
-        return LAMDA * ((gradients.norm(2, dim=1) - 1) ** 2).mean()
 
     def generate_images(self, num_images, path, denormalize=False):
         """
@@ -299,12 +328,12 @@ class WGAN_GP:
             else:
                 vutils.save_image(fake[i], path + 'image_' + str(i) + '.png')
 
-    def log_to_csv(self, run_address):
-        data = pd.read_csv(run_address, delimiter=' ')
-        data = data.applymap(lambda x: re.sub('[^0-9]', '', str(x)))
-        data = data.apply(pd.to_numeric, errors='coerce')
-        data.columns = ['epoch', 'G_loss', 'D_loss']
-        data.to_csv(run_address[:-4] + '.csv', index=False)
+    # def log_to_csv(self, run_address):
+    #     data = pd.read_csv(run_address, delimiter=' ')
+    #     data = data.applymap(lambda x: re.sub('[^0-9]', '', str(x)))
+    #     data = data.apply(pd.to_numeric, errors='coerce')
+    #     data.columns = ['epoch', 'G_loss', 'D_loss']
+    #     data.to_csv(run_address[:-4] + '.csv', index=False)
 
     def weight_initializer(self, m):
         """
@@ -312,25 +341,23 @@ class WGAN_GP:
         :param m: model
         """
         classname = m.__class__.__name__
-        if classname.find('Conv') != -1:
-            nn.init.normal_(m.weight.data, 0.0, 0.02)
-        elif classname.find('BatchNorm') != -1:
-            nn.init.normal_(m.weight.data, 0.0, 0.02)
-            nn.init.constant_(m.bias.data, 0)
+        if isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
+            torch.nn.init.normal_(m.weight, mean=0.0, std=0.02)
+        if isinstance(m, nn.BatchNorm2d):
+            torch.nn.init.normal_(m.weight, mean=0.0, std=0.02)
+            torch.nn.init.constant_(m.bias, val=0)
 
     def save_model(self, path):
         # Saving the model
         torch.save(self.netG.state_dict(), path + 'generator.pth')
-        torch.save(self.netD.state_dict(), path + 'discriminator.pth')
+        torch.save(self.critic.state_dict(), path + 'discriminator.pth')
 
     def load_model(self, path, ngpu, device):
         # Loading the model
         self.netG = Generator(ngpu).to(device)
-        self.netG.load_state_dict(path + 'generator.pth')
-        self.netD = Discriminator(ngpu).to(device)
-        self.netD.load_state_dict(path + 'discriminator.pth')
-        # self.netG= torch.load(path + 'generator.rar', map_location=device)
-        # self.netD = torch.load(path + 'discriminator.rar', map_location=device)
+        self.netG.load_state_dict(torch.load(path + 'generator.pth'))
+        self.critic = Discriminator(ngpu).to(device)
+        self.critic.load_state_dict(torch.load(path + 'discriminator.pth'))
 
     def result_visualization(self):
         # Visualization of the results
@@ -343,7 +370,7 @@ class WGAN_GP:
         plt.legend()
         plt.show()
 
-    def side_by_side_comparison(self, data_loader):
+    def side_by_side_comparison(self, data_loader, save_flag=False, save_path=None, show_flag=True):
         # Grab a batch of real images from the dataloader
         real_batch = next(iter(dataloader))
 
@@ -360,11 +387,13 @@ class WGAN_GP:
         plt.axis("off")
         plt.title("Fake Images")
         plt.imshow(np.transpose(self.img_list[-1], (1, 2, 0)))
-        plt.show()
-
-    def denorm(self, x):
-        out = (x + 1) / 2
-        return out.clamp(0, 1)
+        if show_flag:
+            plt.show()
+        if save_flag:
+            if not os.path.exists(save_path):
+                os.mkdir(save_path)
+            plt.savefig(save_path + 'comparison.png')
+            plt.close()
 
 
 if __name__ == '__main__':
@@ -375,8 +404,7 @@ if __name__ == '__main__':
         transforms.Grayscale(num_output_channels=1),
         transforms.CenterCrop(image_size),
         transforms.ToTensor(),
-        transforms.Normalize((0.5), (0.5))]  # changed to a single channel
-    ))
+        transforms.Normalize((0.5,), (0.5,))]))
 
     # Creating the dataloader
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=workers)
@@ -387,21 +415,20 @@ if __name__ == '__main__':
     # Plot some training images
     # batch_visualizer(device, dataloader, number_of_images=64)
 
-    model = WGAN_GP(device=device, ngpu=ngpu)
-    # run_name = 'run_2023-07-06_15-13-00'
-    # model.load_model(result_root + run_name + '/current/', ngpu, device)
+    model = WGAN(device=device, ngpu=ngpu)
+    # run_name = 'run_2023-07-11_10-25-45'
+    # model.load_model(result_root + run_name + '/current/', ngpu=ngpu, device=device)
     model.train(dataloader=dataloader,
                 device=device,
-                num_epochs=1000,
+                num_epochs=200,
                 verbose=1,
                 nz=nz,
                 lr=lr,
                 beta1=beta1,
                 save_checkpoint=True,
-                checkpoint_interval=100,
+                checkpoint_interval=20,
                 result_root=result_root,
                 generate_images=True
                 )
 
-    # model.generate_images(num_images=100, path=result_root + run_name + '/generated_images/', denormalize=True)
-#
+    # model.generate_images(num_images=100, path=result_root + run_name + '/generated_images/')
