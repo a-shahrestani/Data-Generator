@@ -388,9 +388,9 @@ class GAN:
     def load_model(self, path, ngpu, device):
         # Loading the model
         self.netG = Generator(ngpu).to(device)
-        self.netG.load_state_dict(path + 'generator.pth')
+        self.netG.load_state_dict(torch.load(path + 'generator.pth'))
         self.netD = Discriminator(ngpu).to(device)
-        self.netD.load_state_dict(path + 'discriminator.pth')
+        self.netD.load_state_dict(torch.load(path + 'discriminator.pth'))
         # self.netG= torch.load(path + 'generator.rar', map_location=device)
         # self.netD = torch.load(path + 'discriminator.rar', map_location=device)
 
@@ -428,6 +428,10 @@ class GAN:
         out = (x + 1) / 2
         return out.clamp(0, 1)
 
+    def model_info(self):
+        print(self.netG)
+        print(self.netD)
+
 
 if __name__ == '__main__':
     # We can use an image folder dataset the way we have it setup.
@@ -450,20 +454,23 @@ if __name__ == '__main__':
     # batch_visualizer(device, dataloader, number_of_images=64)
 
     model = GAN(device=device, ngpu=ngpu)
-    # run_name = 'run_2023-07-06_15-13-00'
-    # model.load_model(result_root + run_name + '/current/', ngpu, device)
-    model.train(dataloader=dataloader,
-                device=device,
-                num_epochs=1000,
-                verbose=2,
-                nz=nz,
-                lr=lr,
-                beta1=beta1,
-                save_checkpoint=True,
-                checkpoint_interval=100,
-                result_root=result_root,
-                generate_images=True
-                )
+    model.model_info()
+    run_name = 'run_2024-02-02_11-10-28'
+    model_name = 'epoch_5000'
+    model.load_model(result_root + run_name + f'/{model_name}/', ngpu, device)
+    # model.train(dataloader=dataloader,
+    #             device=device,
+    #             num_epochs=1000,
+    #             verbose=2,
+    #             nz=nz,
+    #             lr=lr,
+    #             beta1=beta1,
+    #             save_checkpoint=True,
+    #             checkpoint_interval=100,
+    #             result_root=result_root,
+    #             generate_images=True
+    #             )
 
-    # model.generate_images(num_images=100, path=result_root + run_name + '/generated_images/', denormalize=True)
+    model.generate_images(num_images=1000, path=result_root + run_name + f'/{model_name}' + '/generated_images/',
+                          denormalize=True)
 #

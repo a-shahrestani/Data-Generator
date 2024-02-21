@@ -1,3 +1,4 @@
+import argparse
 import datetime
 import math
 import os
@@ -16,6 +17,13 @@ import torchvision.utils as vutils
 import numpy as np
 import matplotlib.pyplot as plt
 
+
+parser = argparse.ArgumentParser(description='Conditional WGAN models, single gpu performance test')
+parser.add_argument('--lr', default=0.00005, help='')
+parser.add_argument('--batch_size', type=int, default=32, help='')
+parser.add_argument('--num_workers', type=int, default=0, help='')
+args = parser.parse_args()
+
 # Set random seed for reproducibility
 manualSeed = 999
 # manualSeed = random.randint(1, 10000) # use if you want new results
@@ -25,16 +33,17 @@ torch.manual_seed(manualSeed)
 # torch.use_deterministic_algorithms(True)  # Needed for reproducible results
 
 # Root directory for dataset
-data_root = '../datasets/Pavement Crack Detection/Crack500-Forest Annotated/Images/Train/'
+slurm_Dir = os.environ['SLURM_TMPDIR']
+data_root = f'{slurm_Dir}/Data/Train/'
 
 # Result directory
-result_root = './src/WGAN_GP/results/'
+result_root = '/project/def-gargoum/afshinsh/Data-Generation/WGAN_GP/results/WGAN_GP/'
 
 # Number of workers for dataloader
-workers = 2
+workers = args.num_workers
 
 # Batch size during training
-batch_size = 64
+batch_size = args.batch_size
 
 # Spatial size of training images. All images will be resized to this
 #   size using a transformer.
@@ -372,11 +381,6 @@ class WGAN_GP:
         out = (x + 1) / 2
         return out.clamp(0, 1)
 
-    def model_info(self):
-        # Print the model information
-        print(self.netG)
-        print(self.netD)
-
 
 if __name__ == '__main__':
     # We can use an image folder dataset the way we have it setup.
@@ -399,22 +403,20 @@ if __name__ == '__main__':
     # batch_visualizer(device, dataloader, number_of_images=64)
 
     model = WGAN_GP(device=device, ngpu=ngpu)
-    run_name = 'run_2024-02-16_12-02-49'
-    model_name = 'epoch_1300'
-    model.load_model(result_root + run_name + f'/{model_name}/', ngpu, device)
-    # model.train(dataloader=dataloader,
-    #             device=device,
-    #             num_epochs=1000,
-    #             verbose=1,
-    #             nz=nz,
-    #             lr=lr,
-    #             beta1=beta1,
-    #             save_checkpoint=True,
-    #             checkpoint_interval=50,
-    #             result_root=result_root,
-    #             generate_images=True
-    #             )
-    model.model_info()
-    model.generate_images(num_images=2000, path=result_root + run_name + f'/{model_name}' + '/generated_images4/',
-                          denormalize=True)
+    # run_name = 'run_2023-07-18_14-44-15'
+    # model.load_model(result_root + run_name + '/current/', ngpu, device)
+    model.train(dataloader=dataloader,
+                device=device,
+                num_epochs=1000,
+                verbose=1,
+                nz=nz,
+                lr=lr,
+                beta1=beta1,
+                save_checkpoint=True,
+                checkpoint_interval=50,
+                result_root=result_root,
+                generate_images=True
+                )
+
+    # model.generate_images(num_images=100, path=result_root + run_name + '/generated_images/', denormalize=True)
 #

@@ -97,21 +97,20 @@ class Generator(nn.Module):
         # # since we are reducing the number of channels to get to the number of channels in the image
         # # nc is the number of channels in the final image
 
-        self.ngpu = ngpu
         self.deconv1_1 = nn.ConvTranspose2d(nz, ngf * 16, 4, 1, 0, bias=False)
-        self.deconv1_1_bn = nn.BatchNorm2d(ngf * 16)
+        self.deconv1_1_bn = nn.InstanceNorm2d(ngf * 16)
         self.deconv1_2 = nn.ConvTranspose2d(1, ngf * 16, 4, 1, 0, bias=False)
-        self.deconv1_2_bn = nn.BatchNorm2d(ngf * 16)
+        self.deconv1_2_bn = nn.InstanceNorm2d(ngf * 16)
         self.deconv2 = nn.ConvTranspose2d(ngf * 32, ngf * 16, 4, 2, 1, bias=False)
-        self.deconv2_bn = nn.BatchNorm2d(ngf * 16)
+        self.deconv2_bn = nn.InstanceNorm2d(ngf * 16)
         self.deconv3 = nn.ConvTranspose2d(ngf * 16, ngf * 8, 4, 2, 1, bias=False)
-        self.deconv3_bn = nn.BatchNorm2d(ngf * 8)
+        self.deconv3_bn = nn.InstanceNorm2d(ngf * 8)
         self.deconv4 = nn.ConvTranspose2d(ngf * 8, ngf * 4, 4, 2, 1, bias=False)
-        self.deconv4_bn = nn.BatchNorm2d(ngf * 4)
+        self.deconv4_bn = nn.InstanceNorm2d(ngf * 4)
         self.deconv5 = nn.ConvTranspose2d(ngf * 4, ngf * 2, 4, 2, 1, bias=False)
-        self.deconv5_bn = nn.BatchNorm2d(ngf * 2)
+        self.deconv5_bn = nn.InstanceNorm2d(ngf * 2)
         self.deconv6 = nn.ConvTranspose2d(ngf * 2, ngf, 4, 2, 1, bias=False)
-        self.deconv6_bn = nn.BatchNorm2d(ngf)
+        self.deconv6_bn = nn.InstanceNorm2d(ngf)
         self.deconv7 = nn.ConvTranspose2d(ngf, nc, 4, 2, 1, bias=False)
 
     def forward(self, input, label):
@@ -345,7 +344,7 @@ class C_WGAN:
 
         return LAMDA * ((gradients.norm(2, dim=1) - 1) ** 2).mean()
 
-    def generate_images(self, num_images, path, denormalize=False):
+    def generate_images(self, path, num_images=100, denormalize=False, gen_image_types=[], name='image_'):
         """
         Usage: Generates images with the generator
         :param num_images: number of images to generate
@@ -355,15 +354,20 @@ class C_WGAN:
         if not os.path.exists(path):
             os.mkdir(path)
         with torch.no_grad():
-            label = torch.randint(0, 4, (num_images, 1, 1, 1), device=device, dtype=torch.float)
+            if len(gen_image_types) == 0:
+                label = torch.randint(0, 4, (num_images, 1, 1, 1), device=device, dtype=torch.float)
+            else:
+                label = torch.tensor(gen_image_types, device=device, dtype=torch.float).unsqueeze(-1).unsqueeze(
+                    -1).unsqueeze(-1)
+                num_images = len(gen_image_types)
             noise = torch.randn(num_images, nz, 1, 1, device=device)
             fake = self.netG(noise, label).detach().cpu()
         # Save images
         for i in range(num_images):
             if denormalize:
-                vutils.save_image(fake[i] * 0.5 + 0.5, path + 'image_' + str(i) + '.png')
+                vutils.save_image(fake[i] * 0.5 + 0.5, path + name + str(i) + '.png')
             else:
-                vutils.save_image(fake[i], path + 'image_' + str(i) + '.png')
+                vutils.save_image(fake[i], path + name + str(i) + '.png')
 
     def log_to_csv(self, run_address):
         data = pd.read_csv(run_address, delimiter=' ')
@@ -391,9 +395,9 @@ class C_WGAN:
 
     def load_model(self, path, ngpu, device):
         # Loading the model
-        self.netG = Generator(ngpu).to(device)
+        self.netG = Generator(ngpu, classes).to(device)
         self.netG.load_state_dict(torch.load(path + 'generator.pth'))
-        self.netD = Discriminator(ngpu).to(device)
+        self.netD = Discriminator(ngpu, classes).to(device)
         self.netD.load_state_dict(torch.load(path + 'discriminator.pth'))
         # self.netG= torch.load(path + 'generator.rar', map_location=device)
         # self.netD = torch.load(path + 'discriminator.rar', map_location=device)
@@ -433,6 +437,11 @@ class C_WGAN:
         return out.clamp(0, 1)
 
 
+    def model_info(self):
+        print(self.netG)
+        print(self.netD)
+
+
 if __name__ == '__main__':
     # We can use an image folder dataset the way we have it setup.
     # Create the dataset
@@ -454,23 +463,43 @@ if __name__ == '__main__':
     # batch_visualizer(device, dataloader, number_of_images=64)
 
     model = C_WGAN(device=device, ngpu=ngpu)
-    # run_name = 'run_2023-07-18_14-44-15'
-    # model.load_model(result_root + run_name + '/current/', ngpu, device)
+    model.model_info()
+    model_name = 'epoch_500'
+    run_name = 'run_2024-02-13_11-24-38'
+    model.load_model(result_root + run_name + f'/{model_name}/', ngpu, device)
 
-    model.train(dataloader=dataloader,
-                image_size=image_size,
-                label_size=classes,
-                device=device,
-                num_epochs=200,
-                verbose=2,
-                nz=nz,
-                lr=lr,
-                beta1=beta1,
-                save_checkpoint=True,
-                checkpoint_interval=20,
-                result_root=result_root,
-                generate_images=True
-                )
+    # model.train(dataloader=dataloader,
+    #             image_size=image_size,
+    #             label_size=classes,
+    #             device=device,
+    #             num_epochs=200,
+    #             verbose=2,
+    #             nz=nz,
+    #             lr=lr,
+    #             beta1=beta1,
+    #             save_checkpoint=True,
+    #             checkpoint_interval=20,
+    #             result_root=result_root,
+    #             generate_images=True
+    #             )
+    label_names = ['alligator', 'block', 'longitudinal', 'transverse']
+    labels = [0] * 1000
+    model.generate_images(path=result_root + run_name + f'/{model_name}' + f'/{label_names[0]}/', denormalize=True,
+                          gen_image_types=labels, name='alligator1_')
+    # model.generate_images(path=result_root + run_name + f'/{label_names[0]}/', denormalize=True,
+    #                       gen_image_types=labels, name='alligator5_')
+    # model.generate_images(path=result_root + run_name + f'/{label_names[0]}/', denormalize=True,
+    #                       gen_image_types=labels, name='alligator6_')
+    # model.generate_images(path=result_root + run_name + f'/{label_names[0]}/', denormalize=True,
+    #                       gen_image_types=labels, name='alligator7_')
 
-    # model.generate_images(num_images=100, path=result_root + run_name + '/generated_images/', denormalize=True)
+    labels = [1] * 1000
+    model.generate_images(path=result_root + run_name + f'/{model_name}' + f'/{label_names[1]}/', denormalize=True,
+                          gen_image_types=labels, name='block1_')
+    labels = [2] * 1000
+    model.generate_images(path=result_root + run_name + f'/{model_name}' + f'/{label_names[2]}/', denormalize=True,
+                          gen_image_types=labels, name='longitudinal1_')
+    labels = [3] * 1000
+    model.generate_images(path=result_root + run_name + f'/{model_name}' + f'/{label_names[3]}/', denormalize=True,
+                          gen_image_types=labels, name='transverse1_')
 #
